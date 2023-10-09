@@ -5,8 +5,7 @@ from detectron2.utils.visualizer import Visualizer
 from detectron2.data.catalog import MetadataCatalog, DatasetCatalog
 from detectron2.data.datasets import register_coco_instances
 
-
-
+#**************************************************************************************************************
 def registerCatalog(catalog_name, path_file_json, path_dir_images):
     '''
     Creates a detectron2 catalog called {catalog_name} gathering info

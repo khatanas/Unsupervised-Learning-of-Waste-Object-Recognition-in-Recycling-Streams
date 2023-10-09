@@ -1,315 +1,288 @@
-from config.paths import *
-from config.parameters import emb_dim,ids_dim
+from config_.paths import *
+from config_.parameters import *
 
 from helper.dataframes import *
-from helper.paths import collectPaths
-from helper.annotations import decodeMasks
+from helper.paths import collectPaths,initPath,getName
+from helper.annotations import decodeMasks,filterMasks
 from helper.tuning import readJson,sortedUnique, flattenList
-from helper.common_libraries import join,np,torch
+from helper.common_libraries import join,np,torch,random,exists
 
 import faiss
-import networkx as nx
-from heapq import heappop, heappush
 
-
+#**************************************************************************************************************
+randomSample = lambda group,k: group.sample(k)
 newTimestamps = lambda ids_xb,I: sortedUnique([ids_xb[0][k] for k in list(I.flatten())])
 
 
-def initFaissIndex(gpu):
+def initIndex(gpu):
+    """
+    Initializes an index as well as a container for both the embeddings and their ids
+    """
     index = faiss.IndexFlatL2(emb_dim)
-    return faiss.index_cpu_to_gpu(faiss.StandardGpuResources(),0,index) if (torch.cuda.is_available() and gpu) else index
+    if (torch.cuda.is_available() and gpu): index = faiss.index_cpu_to_gpu(faiss.StandardGpuResources(),0,index)
+    xb = []
+    xb_ids = [[] for _ in range(ids_dim)]
+    return index, xb, xb_ids
 
 
-def addFaissIndex(index,df,ids):
-    # collect info for mapping
-    ids[0]+=extractValues(df,'timestamp_id')
-    ids[1]+=extractValues(df,'SA_id')
-    ids[2]+=extractValues(df,'category_id')
-    # add embeddings to index
-    index.add(extractEmbeddings(df))
-    return index,ids
+def augmentIndex(index,df_xb,xb,ids_xb):
+    """
+    Adds the embeddings contained in {df_xb} to the index.
+    Adds the embeddings contained in {df_xb} to the provided {xb}.
+    Adds the embeddings ids to the provided {ids_xb}
+    Returns the augmented index, xb, and ids_xb.
+    """
+    # adds the embeddings to the index
+    index.add(extractEmbeddings(df_xb))
+    
+    #collect embeddings
+    xb.append(extractEmbeddings(df_xb))
+    
+    # collect the info for the mapping
+    ids_xb[0]+=extractValues(df_xb,'timestamp_id')
+    ids_xb[1]+=extractValues(df_xb,'SA_id')
+    ids_xb[2]+=extractValues(df_xb,'category_id')
+    
+    return index,xb,ids_xb
 
 
-def initQuery(path_dir_merged,category_id=False):
+def initQuery(path_file_merged_xq, category_id=False, k=nb_manual_annotations):
+    """
+    Fetch the manually annotated dataframe, extracts the embeddings and its associated ids
+    Returns all three elements
+    """
     # get df
-    df_xq = readDf(collectPaths(path_dir_merged)[0])
-    # filter category id if requested
-    if category_id: df_xq = filterCat(df_xq,category_id)
+    df_xq = readDf(path_file_merged_xq)
+    
+    # specific category or subset of k instances of each category
+    if category_id or k:
+        df_filtered = []
+        for cat in [category_id] if category_id else sortedUnique(extractValues(df_xq,'category_id')):
+            df_cat = filterCat(df_xq,cat)
+            # pick subset of annotations if requested
+            df_cat = df_cat.sample(k) if k and df_cat.shape[0]>k else df_cat
+            df_filtered.append(df_cat)
+        df_xq = stackDfs(df_filtered)
     # extract embeddings, timestamp_id, SA_id from df
     xq = extractEmbeddings(df_xq)
     ids_xq = extractIds(df_xq)
+    ids_xq.append(extractValues(df_xq,'category_id'))
     return df_xq, xq, ids_xq
 
 
-def initQuickInstanceRetrieval(path_dir_merged_xb, path_dir_merged_xq, category_id, gpu=False):
-    # init index
-    index = initFaissIndex(gpu)
-    
+def initQuickInstanceRetrieval(path_dir_merged_xb, path_file_merged_xq, category_id, gpu=False):
+    """
+    Builds an index with a subpart of the available data and reads the query data.
+    Returns the index, the the query embeddings and the ids of the embeddings used to build the index
+    """
     # extract embeddings from manual annotation
-    _,xq, ids_xq = initQuery(path_dir_merged_xq,category_id)
+    _,xq, ids_xq = initQuery(collectPaths(path_file_merged_xq)[0],category_id)
     
-    # init embeddings mapping
-    ids_xb = [[] for _ in range(ids_dim)]
+    # init index and  iterate over subset of merged files
+    index,xb, ids_xb = initIndex(gpu)
     
-    # iterate over collection of merged files
-    for path in collectPaths(path_dir_merged_xb):
-        # get df, keep masks with AoI==1, keep masks being "head"
+    # collect paths and pick {nb_file} of them at random (speed-up)
+    nb_file = int(max_size_index/nb_rows_max)+1
+    path_list_merged_xb = collectPaths(path_dir_merged_xb)
+    random.shuffle(path_list_merged_xb)
+    path_list_merged_xb = path_list_merged_xb[:nb_file]
+    
+    for path in path_list_merged_xb:
+        # get df, remove seen image
         df_xb = readDf(path)
+        df_xb = cutTimestamp(df_xb,ids_xq[0])
+        
+        # apply further filters
         df_xb = filterAoI(df_xb,1)
         df_xb = filterHead(df_xb,1)
         
-        # remove all masks coming from seen image (the goal is to find new images...)
-        df_xb = filterTimestamp(df_xb,ids_xq[0])
-        
         # augment index
-        index,ids_xb = addFaissIndex(index,df_xb,ids_xb)
+        index,xb,ids_xb = augmentIndex(index,df_xb,xb,ids_xb)
         
     # ==> returns the index, the queries embeddings, the index mapping
     return index, xq, ids_xb
 
 
-def initImageRetrieval(path_dir_merged_xb, path_dir_merged_xq, gpu=True):
-    # init index
-    index = initFaissIndex(gpu)
+def initImageRetrieval(path_list_merged_xb, path_file_merged_xq, category_id, forbidden_timestamps, solo=False,head=True,AoI=True,gpu=True):
+    """
+    Builds an index to perform image retrieval using kNN graph.
+    Returns the index, all embeddings used to perform queries, their associated ids, and the nb of manually annotated annotations available
+    X stacks the embeddings as follows: 
+    X = [all SAM embeddings without assigned categories (those are used to build the index) | manually annotated embeddings]
+    Thus:
+        - X[:index.ntotal] = all SAM embeddings without assigned categories 
+        - X[-nb_annotations:] = manually annotated embeddings
+    """
     
-    # extract embeddings from manual annotation
-    df_xq, xq, ids_xq = initQuery(path_dir_merged_xq)
+    # extract embeddings from manual annotation for the processed category_id
+    df_xq, xq, ids_xq = initQuery(path_file_merged_xq,category_id) 
     
-    # add manual annotations to index, requested for building a graph with ease
-    index,ids_xb = addFaissIndex(index, df_xq, [[] for _ in range(ids_dim)])
-    
-    # collect embeddings
-    X = [xq]
-    
-    # iterate over collection of merged files
-    for path in collectPaths(path_dir_merged_xb):
-        # get df, keep masks with AoI==1, keep masks being "head"
+    # init index, database list, database ids and iterate over selected merged files
+    index, xb, ids_xb = initIndex(gpu)   
+    for path in path_list_merged_xb:
+        # get df, remove categorized images
         df_xb = readDf(path)
-        df_xb = filterAoI(df_xb,1)
-        df_xb = filterHead(df_xb,1)
+        df_xb = cutTimestamp(df_xb,forbidden_timestamps)
         
-        # add categorized embeddings to index, requested for building a graph with ease
-        df_categorized = df_xb[df_xb['category_id']!=-1]      
-        timestamps_to_filter_out = ids_xq[0] + extractValues(df_categorized,'timestamp_id')
-        X.append(extractEmbeddings(df_categorized))
-        index,ids_xb = addFaissIndex(index,df_categorized,ids_xb)
+        # apply different filters
+        df_xb = filterAoI(df_xb,1) if AoI else df_xb
+        df_xb = filterHead(df_xb,1) if head else df_xb
+        df_xb = filterSolo(df_xb,1) if solo else df_xb
         
-        # add all non-categorized embeddings, except those from see images (the goal is still to find new images...)
-        df_xb = filterTimestamp(df_xb,timestamps_to_filter_out)
-        X.append(extractEmbeddings(df_xb))
-        index,ids_xb = addFaissIndex(index,df_xb,ids_xb)
-        
-    X = np.vstack(X)
-    return index, X, ids_xb, df_xq.shape[0]
+        # add all non-categorized embeddings to the index. 
+        index,xb,ids_xb = augmentIndex(index,df_xb,xb,ids_xb)
+    
+    # stack (database, query) embeddings, and ids
+    X = np.vstack(xb+[xq])
+    ids_X = augmentIds(ids_xb,ids_xq)
+    assert all([X.shape[0]==len(ids_X[k]) for k in range(ids_dim)])
+    
+    return index, X, ids_X, int(df_xq.shape[0])
 
 
-def initCategoryIndex(path_dir_merged_xb,path_dir_merged_xq, gpu=False):
+def initCategoryIndex(path_dir_categorized, path_file_merged_xq, max_nb_instances=nb_augment_cat_index):
+    """
+    Init an index containing categorized embeddings. These embeddings come from the manual annotation tool 
+    to which are added {max_nb_instances} categorized embeddings from each category, chosen at random.  
+    Returns an index and the ids of the embeddings contained in the index.
+    """
     # init index
-    index = initFaissIndex(gpu)
+    index_cat,xb_cat,ids_xb_cat = initIndex(gpu=False)   
     
-    # extract embeddings from manual annotation
-    df_xq,_,_ = initQuery(path_dir_merged_xq)
+    # extract embeddings from manual annotation and add manual annotations to index, since they have a category
+    df_xq = readDf(path_file_merged_xq)
+    index_cat,xb_cat,ids_xb_cat = augmentIndex(index_cat, df_xq, xb_cat, ids_xb_cat)
     
-    # add manual annotations to index, since they have a category
-    index,ids_xb = addFaissIndex(index, df_xq, [[] for _ in range(ids_dim)])
+    # browse categorized embeddings. Each df corresponds to a different category
+    for path in collectPaths(path_dir_categorized):
+        if path and exists(path):
+            df = readDf(path)
+            df = df if df.shape[0]<= max_nb_instances else df.sample(max_nb_instances)
+            index_cat, xb_cat, ids_xb_cat = augmentIndex(index_cat, df, xb_cat, ids_xb_cat)
+    return index_cat, ids_xb_cat
+
+
+def eggYolk(index_cat, ids_xb_cat:list, cat:int, X, new_nodes:list, cat_retrieved_nodes:set, kNN, k_out_of_N):
+    """
+    Perform the query {X[nodes]} on the {index_cat} to retrieve the {kNN} of each node.
+    If {k_out_of_N} neighbors of a node are labeled as {cat}, the node is associated to the cat.
+    """
+    # query the kNN of each retrieved nodes, and look at the categories 
+    _,I = index_cat.search(X[new_nodes,:],kNN)
+    kNN_categories = filterIds(ids_xb_cat,I)[2]
     
-    # iterate over collection of merged files
-    for path in collectPaths(path_dir_merged_xb):
-        # get df, keep masks with AoI==1, keep masks being "head"
-        df_xb = readDf(path)
-        df_xb = filterAoI(df_xb,1)
-        df_xb = filterHead(df_xb,1)
+    # categories of kNN should be identical to cat
+    for node, category_votes in zip(new_nodes, kNN_categories):
+        nb_match = (np.array(category_votes)==cat).sum()
+        # collect node if k_out_of_kNN matches
+        if nb_match >= k_out_of_N: cat_retrieved_nodes.add(node)
+    return cat_retrieved_nodes
+
+
+def updateCategorizedRows(points, channel, ids_xb, retrieved_nodes, category_id):
+    """
+    Fetch the rows from df_merged, adds a category_id and returns the 
+    """
+    
+    categorized_rows = []
+    
+    # collect timestamps
+    new_timestamps = set(filterIds(ids_xb, retrieved_nodes)[0])
+    
+    # load merged_dict and find merged files where new annotations have to be updated
+    merged_dict = readJson(join(path_root_embeddings_from_masks,points,channel,'merged_dict.json'))
+    merged_indices = sortedUnique([merged_dict[item] for item in new_timestamps])
+    for merged_id in merged_indices:
+        # load merged{merged_id}.csv
+        path_merged = join(path_root_embeddings_from_masks,points,channel,'df_merged',f'merged{merged_id}.csv')
+        df = readDf(path_merged)
         
-        # keep these with a category
-        df_xb = df_xb[df_xb['category_id']!=-1]        
+        # collects timestamps belonging to the loaded df
+        belongs_to = [item for item in new_timestamps if merged_dict[item]==merged_id]
         
-        # augment index
-        index,ids_xb = addFaissIndex(index,df_xb,ids_xb)
-    return index, ids_xb
-
-
-def collectEdges(index,X,k):
-        # find the (k+1)-th nearest neighbor of each mask (1st is self)
-    E = []
-    for idx in range(index.ntotal):
-        if idx%1000==0:print(f'{idx}/{index.ntotal}')
-        D,I = index.search(X[idx:idx+1,:], k+1)
-        D = list(D.squeeze())
-        I = list(I.squeeze())
-        # get rid of first retrieval and store remaining as edge: [u,v,weight]
-        for k_th in range(1,k+1): E.append([str(idx),str(I[k_th]),D[k_th]])
-    return E
-
-
-def buildGraph(E):
-    # build undirected weighted graph
-    G = nx.Graph()
-    G.add_edges_from([(edge[0],edge[1],{'weight':edge[2]}) for edge in E])
-    return G
-
-
-def buildGraphCollection(index,X,k):
-    # collect edges
-    E = collectEdges(index,X,k)
-    
-    nb_edge = len(E)
-    nb_node = index.ntotal
-    
-    # find disconnected graphs
-    groups_of_nodes = [list(vertex) for vertex in nx.connected_components(buildGraph(E))]
-    nb_graph = len(groups_of_nodes)
-    
-    print(f'\nThe main graph is connected') if nb_graph==1 else print(f'\nThe main graph is made of {nb_graph} disconnected graphs:')
-    
-    # build a dictionary to assign a subgraph to each node (speed up edge filtering)
-    belongs_to = {node:-1 for node in range(nb_node)}
-    for graph_id in range(nb_graph):
-        for node_id in groups_of_nodes[graph_id]:
-            belongs_to[node_id] = graph_id
+        # map timestamps to nodes
+        related_nodes = [item for item in retrieved_nodes if ids_xb[0][item] in belongs_to]
+        
+        # udpdate merged file
+        for item in related_nodes:
+            timestamp_id = ids_xb[0][item]
+            SA_id = ids_xb[1][item]
+            index_value = df[np.logical_and(df['timestamp_id']==timestamp_id, df['SA_id']==SA_id)].index
+            df.loc[index_value,['category_id']]=category_id
+            categorized_rows.append(df.loc[index_value])
             
-    # init list to store filtered vertices, subgraphs, and SCCs 
-    subgraphs = [[] for _ in range(3)]
-    for graph_id in range(nb_graph):
-        # filter edges
-        subgraphs[0].append([E[edge_id] for edge_id in range(nb_edge) if belongs_to[E[edge_id][0]]==graph_id])
-        # build unweighted directed subgraph
-        subG = nx.DiGraph()
-        subG.add_edges_from([(edge[0],edge[1]) for edge in subgraphs[0][graph_id]])
-        subgraphs[1].append(subG)
-        # find SCC of subgraph with cardinality>1
-        subgraphs[2].append([nodes for nodes in list(nx.strongly_connected_components(subgraphs[1][graph_id])) if len(nodes)>1])
-        
-        flattened = [node for group in subgraphs[2][graph_id] for node in group]
-        print(f'Subgraph {graph_id}: {len(groups_of_nodes[graph_id])} vertices, with {len(subgraphs[2][graph_id])} SCC, totalizing {len(flattened)} vertices')
-    
-    return subgraphs
+    # all rows collected, merged the them together with the previous categorized rows
+    path_file_categorized = join(path_root_embeddings_from_masks,points,channel,'df_categorized',f'{category_id}.csv')
+    df_categorized = [readDf(path_file_categorized)] if exists(path_file_categorized) else []
+    df_categorized += categorized_rows
+    if df_categorized: writeDf(path_file_categorized, stackDfs(df_categorized) if len(df_categorized)>1 else df_categorized[0])
 
 
-def shortestPath(G,src,target,forbidden_nodes=[]):
-    # graph nodes are of type str
-    src = str(src)
-    target = str(target)
-    forbidden_nodes = [str(item) for item in forbidden_nodes]
+def filterIds(ids_xb,I,token=False):
+    """
+    Selects the ids corresponding to the nodes contained in I
+    If I is an 2D array, the "ids per query" are returned
+    """
+    # container for the output
+    ids = [[] for _ in range(ids_dim)]
     
-    # init dict for distances and path retrieval
-    parents = {node: -1 for node in G.nodes()}
-    distances = {node: float('inf') for node in G.nodes()}
-    distances[src] = 0
+    if type(I) is np.ndarray:
+        nb_queries = I.shape[0]
+        kNN = I.shape[1]
+        I =  list(I.flatten())
+        token = True
+    elif type(I)==list or type(I)==set: I = [int(item) for item in I]
     
-    # assess existence of target in graph
-    if target not in distances.keys(): 
-        print(f'{target} not in G')
-        return [[] for _ in range(2)]
+    elif type(I)==int: I = [I]
     
-    # init searching 
-    visited = set()
-    heap = [(0, src)]
-    while heap:
-        _,current_node = heappop(heap)
-        if current_node == target: break
-        if current_node not in visited:
-            visited.add(current_node)
-            # iterate over current node's neighbors
-            for neighbor, attributes in G[current_node].items():
-                # check if neighbor is not forbidden
-                distance_step = float('inf') if neighbor in forbidden_nodes else attributes['weight']
-                # update distance and parent if better path is found
-                if distances[current_node] + distance_step < distances[neighbor]:
-                    distances[neighbor] = distances[current_node] + distance_step
-                    parents[neighbor] = current_node
-                    heappush(heap,(distances[neighbor],neighbor))
+    # return [[timestamps],[SA_id],[cat]]
+    for node in I:
+        for idx in range(ids_dim):
+            ids[idx] += [ids_xb[idx][node]]
     
-    if distances[target]<float('inf'):
-        # retrieve path src ==> dest
-        path = [target]
-        while path[0]!=src: path = [parents[path[0]]] + path  
-        # collect distances 
-        dists = [distances[node] for node in path]
-        
-        return path,dists
+    if token:
+    # If I is a [2x3] 2D array, if corresponds to a request of finding the kNN = 3 nearest neighbors for nb_queries = 2 queries
+    # [[a,b,c],[d,e,f]] ==> flattened ==> [a,b,c,d,e,f] ==> get ids ==> [[timestamps],[SA_ids],[category_ids]] ==> stack back ==> 
+    # ==> [[[timestamps of q1], [timestamps of q2]],[[SA_ids of q1],[SA_ids of q2]],[[category_ids of q1],[category_ids of q2]]]
+        for idx in range(ids_dim): 
+            ids[idx] = [ids[idx][k*kNN:(k+1)*kNN] for k in range(nb_queries)]
     
-    else:
-        print(f'{src} and {target} disconnected')
-        return [[] for _ in range(2)]
+    return ids
+
+
+def augmentIds(ids_to_augment, ids_to_add):
+    """
+    Adds {ids_to_add} to {ids_to_augment}
+    """
+    for idx,items in enumerate(ids_to_add): 
+        ids_to_augment[idx] += items
+    return ids_to_augment
 
 
 def getMaskQ(channel,ids_xq,idx):
+    """
+    The function fetches a mask from the manually annotated collection (Q for query)
+    Returns the mask corresponding to the the {idx}-th (timestamp,SA_id) stored in {ids_xq} 
+    """
     # ids 
     timestamp_id = ids_xq[0][idx]
     SA_id = ids_xq[1][idx]
     # path to masks file in "manual annotation directory"
     path = join(path_root_manual_annotation,channel,'ann_images',timestamp_id+'.json')
-    # masks
-    masks = decodeMasks(readJson(path))
-    # specific mask
-    mask = [mask for mask in masks if mask['id']==SA_id]
-    return mask[0] if len(mask)==1 else []
+    
+    return filterMasks(decodeMasks(readJson(path)),SA_id)
 
 
 def getMaskB(points,channel,ids_xb,idx):
+    """
+    The function fetches a mask from the SA collection (B for dataBase)
+    Returns the mask corresponding to the the {idx}-th (timestamp,SA_id) stored in {ids_xq} 
+    """
     timestamp_id = ids_xb[0][idx]
     SA_id = ids_xb[1][idx]
     # path to masks file in "masks from images directory"
     path = join(path_root_masks_from_images,points,channel,timestamp_id+'.json')
-    # masks
-    masks = decodeMasks(readJson(path))
-    # specific masks
-    mask = [mask for mask in masks if mask['id']==SA_id]
-    return mask[0] if len(mask)==1 else []
+    
+    return filterMasks(decodeMasks(readJson(path)),SA_id)
 
 
-def updateCategories(points, channel, ids_xb, retrieved_nodes, available_categories):
-    # flatten the nested lists
-    flatten_nodes = flattenList(retrieved_nodes)
-    
-    # build a category dictionary
-    category_dict = {node:-1 for node in flatten_nodes}
-    for cat_idx, cat in enumerate(available_categories):
-        for node in retrieved_nodes[cat_idx]:
-            category_dict[node]=cat
-    
-    # collect timestamps and unique timestamps
-    all_timestamps = [ids_xb[0][node] for node in flatten_nodes]
-    unique_timestamps = sortedUnique(all_timestamps)
-    
-    # load merged_dict and iterate over merged_ids
-    merged_dict = readJson(join(path_root_embeddings_from_masks,points,channel,'merged_dict.json'))
-    for merged_id in sortedUnique(merged_dict.values()):
-        # load merged{merged_id}.csv
-        path = join(path_root_embeddings_from_masks,points,channel,'df_merged',f'merged{merged_id}.csv')
-        df = readDf(path)
-        
-        # collects timestamps belonging to the loaded df
-        belongs_to = [timestamp for timestamp in merged_dict.keys() if merged_dict[timestamp]==merged_id and timestamp in unique_timestamps]
-        
-        # map timestamps to nodes
-        related_nodes = [node for node in flatten_nodes if ids_xb[0][node] in belongs_to]
-        
-        # udpdate merged file
-        for node in related_nodes:
-            timestamp_id = ids_xb[0][node]
-            SA_id = ids_xb[1][node]
-            index_value = df[np.logical_and(df['timestamp_id']==timestamp_id, df['SA_id']==SA_id)].index
-            df.loc[index_value,['category_id']]=category_dict[node]
-        # save updates
-        writeDf(path,df)
-
-
-def filterIds(ids_xb,I,token=False):
-    ids = [[] for _ in range(ids_dim)]
-    if type(I) is np.ndarray:
-        nb_query = I.shape[0]
-        kNN = I.shape[1]
-        I =  list(I.flatten())
-        token = True
-    elif type(I) == list: I = [int(item) for item in I]
-    elif type(I) == int or type(I) == str: I = [int(I)]
-        
-    for k in I:
-        for idx in range(ids_dim):
-            ids[idx] += [ids_xb[idx][k]]
-    
-    if token:
-        for idx in range(ids_dim): 
-            ids[idx] = [ids[idx][k*kNN:(k+1)*kNN] for k in range(nb_query)]
-    return ids

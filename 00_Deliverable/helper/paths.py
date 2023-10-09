@@ -1,24 +1,28 @@
-from config.paths import *
+from config_.paths import *
 
-from helper.common_libraries import makedirs,listdir,exists,join,isfile,getsize
+from helper.common_libraries import makedirs,listdir,exists,join,isfile
 
-
-getName = lambda path: path.split('/')[-1]    
+#**************************************************************************************************************
+# retuns last element of a path
+getName = lambda path: path.split('/')[-1]
+# returns timestamp of a path
 getId = lambda path: getName(path)[:23]
+# returns channel of a path
 getChannel = lambda path: getName(path)[:7]
 
 
-def describePath(path, description=''):
-    files = collectPaths(path) 
-    print(f'{description}: {len(files)} files, {int(sum([getsize(file)/(1024**3) for file in files]))} GB')
-
-
 def initPath(path):
+    """
+    Creates a directory located at {path}
+    """
     if not exists(path): makedirs(path)
     return path
 
 
 def searchRoot(root,excluded):
+    """
+    Explores a root and returns a list of new paths to files and a list of new discovered roots 
+    """
     paths = []
     belongs_to_root = [root] if isfile(root) else [join(root,item) for item in listdir(root)]
     paths += [item for item in belongs_to_root if isfile(item) if not any([item.endswith(ext) for ext in excluded])]
@@ -27,6 +31,9 @@ def searchRoot(root,excluded):
 
 
 def collectPaths(roots, excluded = ['#','txt','db']):
+    """
+    Returns a list containing all paths to all files rooted at any root contained in the {roots} list input
+    """
     if type(roots) == str: roots = [roots]
     paths=[]
     for root in roots:
@@ -36,9 +43,9 @@ def collectPaths(roots, excluded = ['#','txt','db']):
     return sorted(paths)
 
 
-def getTailPath(id,ext='.jpg'):
+def getImagePath(id,ext='.jpg'):
     """
-    id.ext ==> channel/yyyy/mm/dd/id.ext
+    Returns the path to the image corresponding to the input {id}
     """
     splitted = id.split('_')
     channel = splitted[0]
@@ -46,19 +53,14 @@ def getTailPath(id,ext='.jpg'):
     mm = splitted[1][4:6]
     dd = splitted[1][6:8]
     
-    return join(channel,yyyy,mm,dd,id+ext)
-
-
-def getImagePath(id,ext='.jpg'):
-    """
-    Return path_file_image
-    """
-    return join(path_root_images_from_src, getTailPath(id,ext=ext))
+    path_tail =  join(channel,yyyy,mm,dd,id+ext)
+    
+    return join(path_root_images_from_src, path_tail)
 
 
 def alterPath(path_root_src, path_root_dest, path_file):
     '''
-    path_file_any = path_root_src/.../any_file_name.any
+    path_file = path_root_src/.../any_file_name.any
     
     case imgs from video:
     path_root_src/channel/yyyy/mm/dd/image_id.jpg ==> 
@@ -69,3 +71,6 @@ def alterPath(path_root_src, path_root_dest, path_file):
     path = path.replace(file_name,'')
     
     return initPath(path)
+
+
+

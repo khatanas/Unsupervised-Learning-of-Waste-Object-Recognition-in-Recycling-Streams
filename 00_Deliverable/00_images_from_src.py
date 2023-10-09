@@ -1,5 +1,5 @@
-from config.paths import *
-from config.parameters import max_width
+from config_.paths import *
+from config_.parameters import max_width
 
 from helper.videos import extractImages
 from helper.scriptIO import requestChannel,requestBool,requestInt,requestFloat,requestSrcPath,getPathList
@@ -29,10 +29,10 @@ else: ###########################   Load images from some src, format name #####
     
     # request new channel name (required to respect pipeline format)
     while True:
-        print('Please enter 5 digits: XX . . . . .')
-        new_channel_digits = input('New channel name: XX')
-        new_channel = 'XX'+new_channel_digits
+        print('Please enter 7 characters')
+        new_channel = input(f'New channel name: ')
         if len(new_channel) == 7 and not exists(join(path_root_images_from_src,new_channel)):break
+        else: print(f'{new_channel} already exists!')
     
     # assign dummy year/month/day path (required to respect pipeline format) (https://www.globalrecyclingday.com/)
     path_dir_dest = initPath(join(path_root_images_from_src,new_channel,'2023','03','18'))

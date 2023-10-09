@@ -1,36 +1,48 @@
-from config.paths import path_root_videos
-from config.parameters import missed,max_width,min_light,deadtime
+from config_.paths import path_root_videos
+from config_.parameters import missed,max_width,min_light,deadtime
 
 from helper.paths import collectPaths
 from helper.common_libraries import cv2,np,datetime,timedelta,deepcopy,join
 
+#**************************************************************************************************************
+# computes the mean square error
+mse = lambda image1,image2: np.mean((image1.astype(np.int16) - image2) ** 2)
 
-def correctFormat(path_file_video):
+# some explicit lambda functions to manipulate and use the datetime variable
+updateTimestamp = lambda dt,seconds: dt+timedelta(seconds=seconds)
+stringTimestamp = lambda dt: dt.strftime("%Y%m%d_%H%M%S")
+makeFilename = lambda channel, dt: f'{channel}_{stringTimestamp(dt)}.jpg'
+
+def validFormat(path_file_video):
+    """
+    Checks if the name of the file corresponds to a valid format
+    Returns a boolean True:valid/False:not valid
+    """
+    # path_root_videos/channel/year/month/day/file_name.ext 
     tail = path_file_video.replace(path_root_videos+'/','')
     splitted = tail.split('/')
     channel = splitted[0]
     name = splitted[-1]
     
-    # test: channel/year/month/day/file_name.ext 
+    # [channel,year,month,day,file_name.ext]
     if len(splitted)==5:
-        #CH00001/2022/10/21/Argos_00_20221021075511.mp4
-        #IN00001/2023/03/23/Argos_00_20230323194402.mp4
-        #IN00002/2022/10/27/Apollo_00_20221027070256.mp4
         if channel in ['CH00001','IN00001','IN00002']:
-            # test: something1_something2_something3
+            # CH00001: must be similar to CH00001/2022/10/21/Argos_00_20221021075511.mp4
+            # IN00001: must be similar to IN00001/2023/03/23/Argos_00_20230323194402.mp4
+            # IN00002: must be similar to IN00002/2022/10/27/Apollo_00_20221027070256.mp4
             splitted = name.split('_')
             if len(splitted) == 3:
-                # test: timecode ==> yyyyddmmhhmmss 
                 timecode = splitted[-1].split('.')[0]
                 return True if len(timecode)==14 else False
-        #CH00004/2023/03/02/2023-03-02T07%3A35%3A34.017065.avi'
-        if channel == 'CH00004': return True if len(name.split('.')[0])==23 else False
+        if channel == 'CH00004': 
+            #CH00004: must be similar to CH00004/2023/03/02/2023-03-02T07%3A35%3A34.017065.avi'
+            return True if len(name.split('.')[0])==23 else False
     return False
 
 
 def initTimestamp(path_file_video):
     '''
-    Create a datetime variable based on the location and name of the video file
+    Creates a datetime variable based on the location and name of the video file
     '''
     splitted = path_file_video.split('/')
     dd = splitted[-2]
@@ -38,18 +50,17 @@ def initTimestamp(path_file_video):
     yyyy = splitted[-4]
     channel = splitted[-5]
     
-    #'.../arc/cameras/CH00001/2022/10/21/Argos_00_20221021075511.mp4'
-    #'.../arc/cameras/IN00001/2023/03/23/Argos_00_20230323194402.mp4'
-    #'...arc/cameras/IN00002/2022/10/27/Apollo_00_20221027070256.mp4'
     if channel in ['CH00001','IN00001,IN00002']:
+        #'.../arc/cameras/CH00001/2022/10/21/Argos_00_20221021075511.mp4'
+        #'.../arc/cameras/IN00001/2023/03/23/Argos_00_20230323194402.mp4'
+        #'...arc/cameras/IN00002/2022/10/27/Apollo_00_20221027070256.mp4'
         splitted=path_file_video.split('_')[-1].split('.')[0]
         h = splitted[-6:-4]
         m = splitted[-4:-2]
         s = splitted[-2:]    
     
-    #'.../arc/cameras/CH00004/2023/03/02/2023-03-02T07%3A35%3A34.017065.avi'
     if channel == 'CH00004':
-        #from file name
+        #'.../arc/cameras/CH00004/2023/03/02/2023-03-02T07%3A35%3A34.017065.avi'
         splitted=path_file_video.split('%3A')
         h = splitted[0][-2:]
         m = splitted[1]
@@ -59,19 +70,23 @@ def initTimestamp(path_file_video):
     
     return dt
 
-updateTimestamp = lambda dt,seconds: dt+timedelta(seconds=seconds)
-stringTimestamp = lambda dt: dt.strftime("%Y%m%d_%H%M%S")
-makeFilename = lambda channel, dt: f'{channel}_{stringTimestamp(dt)}.jpg'
-
 
 def updateMean(image, mean_acc, count):
-    mean = np.mean(image)
-    mean_acc = (count*mean_acc+mean)/(count+1)
+    """
+    Updates the dynamical mean: new_mean = (k*mean+value)/(k+1)
+    """
+    value = np.mean(image)
+    mean_acc = (count*mean_acc+value)/(count+1)
     count += 1
     return mean_acc, count
 
 
 def updateFrameId(frame_id,dt,interval,fps,direction=True):
+    """
+    Updates by {interval*fps} the frame_id and its associated datetime variable
+    If direction is True, updates towards the end of the video
+    If direction is False, updates towards the beginning of the video
+    """
     if direction:
         frame_id += int(interval*fps)
         dt = updateTimestamp(dt,interval)
@@ -82,11 +97,15 @@ def updateFrameId(frame_id,dt,interval,fps,direction=True):
 
 
 def extractImages(path_file_video, path_dir_output, similarity_threshold, sampling_interval):
-    if not correctFormat(path_file_video):
+    """
+    Extraction algorithm, further described in the rapport
+    """
+    # the name of the file must respect the required format
+    if not validFormat(path_file_video):
         print(path_file_video + ': incorrect format')
         return
     
-    # get channel
+    # get the channel and collect alredy existing images 
     channel =  path_file_video.split('/')[-5]
     path_list_images = collectPaths(path_dir_output)
     
@@ -122,7 +141,6 @@ def extractImages(path_file_video, path_dir_output, similarity_threshold, sampli
                 width = hw_video[1]
                 
                 # similarity condition
-                mse = lambda image1,image2: np.mean((image1.astype(np.int16) - image2) ** 2)
                 is_similar = lambda ref,new: mse(ref,new) < (similarity_threshold*mean_acc)**2
                 
                 # init reference image
@@ -132,7 +150,7 @@ def extractImages(path_file_video, path_dir_output, similarity_threshold, sampli
                     if max_width>0:
                         # downscale to save
                         scaling_factor_x = width/max_width
-                        to_jpg = cv2.resize(to_jpg, (max_width, (int(height/scaling_factor_x))))
+                        to_jpg = cv2.resize(to_jpg, (max_width, (int(height/scaling_factor_x))),interpolation=cv2.INTER_LANCZOS4)
                     cv2.imwrite(join(path_dir_output, makeFilename(channel,dt)), to_jpg)
                     last_saved_image=initial_capture
                 
@@ -191,7 +209,7 @@ def extractImages(path_file_video, path_dir_output, similarity_threshold, sampli
                         to_jpg = deepcopy(new_image)
                         if max_width>0:
                             scaling_factor_x = width/max_width
-                            to_jpg = cv2.resize(to_jpg, (max_width, (int(height/scaling_factor_x))))
+                            to_jpg = cv2.resize(to_jpg, (max_width, (int(height/scaling_factor_x))),interpolation=cv2.INTER_LANCZOS4)
                         cv2.imwrite(join(path_dir_output, makeFilename(channel,dt)), to_jpg)
                         
                         last_saved_image = new_image
@@ -199,41 +217,3 @@ def extractImages(path_file_video, path_dir_output, similarity_threshold, sampli
                         
     # Release the video capture object
     video_capture.release()
-
-
-
-
-
-
-
-
-
-
-'''def updateTimestamp(dt, seconds):
-    """
-    Adds {seconds} seconds to {dt}
-    """
-    return (dt+timedelta(seconds=seconds))
-
-
-def stringTimestamp(dt):
-    """
-    Convert a dt variable to a string representation
-    """
-    return dt.strftime("%Y%m%d_%H%M%S")
-
-
-def makeFilename(channel, dt):
-    """
-    Creates a file name based on provided channel and datetime variable
-    {channel}_yyyymmdd_hhmmss.jpg
-    """
-    return f'{channel}_{stringTimestamp(dt)}.jpg'
-    
-    
-def mse(image1, image2):
-    """
-    Compute mse error between image1 and image2
-    """
-    return np.mean((image1.astype(np.int16) - image2) ** 2)
-'''

@@ -1,13 +1,14 @@
-from config.paths import *
-from config.parameters import arch_SA
+from config_.paths import *
+from config_.parameters import arch_SA
 
 from helper.paths import getImagePath
 from helper.tuning import imreadRGB
 from helper.common_libraries import np,join,plt,random
 
 from segment_anything import sam_model_registry
-############### Directly from {SA,detectron2} github or slighty modified ########################
 
+#**************************************************************************************************************
+############### Directly from {SA,detectron2} github or slighty modified ########################
 def show_anns(anns):
     if len(anns) == 0:
         return
@@ -33,7 +34,7 @@ def show_mask(mask, ax, random_color=False):
     h, w = mask.shape[-2:]
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
     ax.imshow(mask_image)
-    
+
 def show_points(coords, labels, ax, marker_size=20):
     pos_points = coords[labels==1]
     neg_points = coords[labels==0]
@@ -45,7 +46,6 @@ def show_box(box, ax):
     w, h = box[2] - box[0], box[3] - box[1]
     ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))    
 
-
 ############### perso ########################
 def initSam():
     model_type = arch_SA
@@ -53,8 +53,8 @@ def initSam():
     sam = sam_model_registry[model_type](checkpoint=path_file_SA_checkpoint)
     sam.to(device=device)
     return sam
-    
-    
+
+
 def getMask(image, predictor, xy_list,label_list,show=False,p=5):
     '''
     Takes as input the image, the predictor, the prompts
@@ -84,30 +84,13 @@ def getMask(image, predictor, xy_list,label_list,show=False,p=5):
 def visualizeSA(image, masks=[],
                 title='',show_title=True ,axis='off',path_save=False):
     '''
-    Display colored masks on image
+    Displays the image together with the provided masks
     '''
+    
     if type(masks) is not list: masks = [masks]
     
     plt.figure()
-    plt.imshow(image)
-    if show_title: plt.title(title)
-    show_anns(masks)
-    plt.axis(axis)
-    if path_save!=False: plt.savefig(join(path_save,f'{title}.jpg'),bbox_inches='tight')
-    plt.show()
-
-
-
-def visualizeSA2(masks=[],
-                title='',show_title=True ,axis='off',path_save=False):
-    '''
-    Display colored masks on image
-    '''
-    if type(masks) is not list: masks = [masks]
-    image = imreadRGB(getImagePath(masks[0]['timestamp_id']))
-    
-    plt.figure()
-    plt.imshow(image)
+    plt.imshow(image if type(image) is np.ndarray else imreadRGB(getImagePath(masks[0]['timestamp_id'])))
     if show_title: plt.title(title)
     show_anns(masks)
     plt.axis(axis)

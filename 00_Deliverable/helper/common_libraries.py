@@ -1,5 +1,4 @@
 import sys
-import clip
 import cv2
 import torch
 import json

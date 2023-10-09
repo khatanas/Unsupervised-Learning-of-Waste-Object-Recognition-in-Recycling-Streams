@@ -1,114 +1,148 @@
+from config_.paths import path_root_GT
+
 from helper.tuning import readJson, writeJson,imreadRGB
-from helper.paths import getName,getImagePath,getId,getChannel
+from helper.paths import getImagePath,getId,getChannel,getName
+from helper.annotations import encodeMasks
 
-from helper.common_libraries import random,shuffle,listdir,makedirs,join
+from helper.common_libraries import random,join,cv2,np,os
 
-
-getPathListFromCoco = lambda json_file:[getImagePath(getId(item['file_name'])) for item in json_file['images']]
+#**************************************************************************************************************
+getPathListFromCoco = lambda coco_annotations:[getImagePath(getId(item['file_name'])) for item in coco_annotations['images']]
 getCocoName =  lambda path: getImagePath(getId(path)).split(f'{getChannel(path)}/')[-1]
-getCocoImageId = lambda path,json_file: [item['id'] for item in json_file['images'] if item['file_name']==getCocoName(path)][0]
+getCocoImageId = lambda path_file_any,coco_annotations: [item['id'] for item in coco_annotations['images'] if item['file_name']==getCocoName(path_file_any)][0]
+getAnnsFromImageId = lambda image_id, coco_annotations: [item for item in coco_annotations['annotations'] if item['image_id']==image_id]
 
 
-def initCocoAnnotations(path_file_json,path_list_images,categories=[]):
-    channel = getName(path_list_images[0])[:7]
+def masksFromPolygons(coco_annotations):
+    """
+    Converts Polygon format to RLE format
+    """
+    images = coco_annotations['images']
+    anns = coco_annotations['annotations']
+    
+    # quick_dict: fast search of annotations corresponding to image_id
+    quick_dict = {item['id']:[] for item in images}
+    for k,ann in enumerate(anns): quick_dict[ann['image_id']].append(k)
+    
+    # iterate over all images (need image dimension)
+    for k,image in enumerate(images):
+        if k %100==0:print(f'{k}/{len(images)}')
+        h = image['height']
+        w = image['width']
+        image_id = image['id']
+        
+        # iterate over all ann of image
+        for k in quick_dict[image_id]:
+            ann = anns[k]
+            # just to be really sure
+            if ann['image_id'] == image_id and type(ann['segmentation'])==list:
+                mask = np.zeros([h,w],dtype=np.uint8)
+                
+                polygons = ann['segmentation']
+                
+                # iterate over all polygons of ann (disconnected mask)
+                for polygon in polygons:
+                    pts = np.array(polygon, dtype=np.int32).reshape((-1, 2))
+                    cv2.fillPoly(mask, [pts], 1)
+                
+                # collect masks
+                ann['segmentation'] = mask
+                anns[k] = encodeMasks([ann])[0]
+            else:print('issue')
+            
+    return coco_annotations
+
+
+def initCocoImage(path_file_image,k):
+    """
+    Returns an image coco dictionary for the image located at {path_file_image}
+    """
+    image = imreadRGB(path_file_image)
+    height,width = image.shape[:2]
+    image_dict = {
+        "file_name": getCocoName(path_file_image),
+        "height":height,
+        "width":width,
+        "id":k}
+    return image_dict
+
+
+def initCocoAnnotations(path_file_json,path_list_images=[],categories=[],annotations=[]):
+    """
+    Initializes a coco file
+    """
     images = []
-    for k,path in enumerate(path_list_images):
-        image = imreadRGB(path)
-        height,width = image.shape[:2]
-        images.append(
-            {
-                "file_name": path.split(f'{channel}/')[-1],
-                "height":height,
-                "width":width,
-                "id":k
-            }
-        )
-    json_file = {
+    for k,path in enumerate(path_list_images): images.append(initCocoImage(path,k))
+    coco_annotations = {
             "info":{},
             "licenses":[],
             "images":images,
             "categories":categories,
-            "annotations":[]
+            "annotations":annotations
     }
-    writeJson(path_file_json,json_file)
-    return json_file
+    writeJson(path_file_json,coco_annotations)
+    return coco_annotations
 
 
-def makeIdUnique(path_file_json,json_file=False):
-    if not json_file: json_file=readJson(path_file_json)
-    anns = json_file['annotations']
+def makeIdUnique(path_file_json,coco_annotations=False):
+    """
+    Makes the ids of the annotations unique
+    """
+    if not coco_annotations: coco_annotations=readJson(path_file_json)
+    anns = coco_annotations['annotations']
     for k,ann in enumerate(anns): ann['id'] = k
-    json_file['annotations']=anns
-    writeJson(path_file_json,json_file)
-    return json_file
-
-
-def addCategory(path_file_json,json_file=False):
-    if not json_file: json_file=readJson(path_file_json)
-    nb_categories = len(json_file['categories'])
-    cat = int('9'+str(nb_categories+1).zfill(4))
-    json_file['categories'].append({
-        "supercategory":cat,
-        "id":cat,
-        "name":input("New category name: ")}
-    )
-    writeJson(path_file_json,json_file)
-    print('Added !')
-    print('')
-    return readJson(path_file_json)
+    coco_annotations['annotations']=anns
+    writeJson(path_file_json,coco_annotations)
+    return coco_annotations
 
 
 def clearAnnotations(path_file_json):
     '''
-    Empty the "annotation" field of json file located at path_file_json
+    Empties the "annotation" field of json file located at path_file_json
     '''
-    json_file = readJson(path_file_json)
-    json_file['annotations'] = []
-    writeJson(path_file_json,json_file)
+    coco_annotations = readJson(path_file_json)
+    coco_annotations['annotations'] = []
+    writeJson(path_file_json,coco_annotations)
 
 
-def trainTestSplit(path_file_json, test_input):
+def splitCoco(path_file_json, path_dir_output, nb=0, file_names=[]):
     '''
-    Perform train-test split.
+    Performs train-test split.
     if test_input is an int, create a te partition of len == test_input
-    if test_input is a list, it has to be a list of existing file_name in the original json_file. The te partitions contain the annotations related to those images. 
+    if test_input is a list, it has to be a list of existing file_name in the original coco_annotations. The te partitions contain the annotations related to those images. 
     '''
-    json_file = readJson(path_file_json)
-    json_name = path_file_json.split('/')[-1]
-    path_dir_split = path_file_json.replace(f'/{json_name}','')
+    coco_annotations = readJson(path_file_json)
+    json_name = getName(path_file_json).split('.')[0]
     
-    if type(test_input)==list: test_list = test_input
-    elif type(test_input)==int:
-        image_list = sorted([d['file_name'] for d in json_file['images']])
+    if file_names: test_list = file_names
+    elif nb:
         random.seed(10)
-        shuffle(image_list)
-        test_list = image_list[test_input]
-        test_list = sorted(test_list)
+        test_list = sorted(random.sample(sorted([d['file_name'] for d in coco_annotations['images']]),nb))
     
-    lod_images_te = [d for d in json_file['images'] if d['file_name'] in test_list]
-    lod_images_tr = [d for d in json_file['images'] if d['file_name'] not in test_list]
-
+    lod_images_te = [d for d in coco_annotations['images'] if d['file_name'] in test_list]
+    lod_images_tr = [d for d in coco_annotations['images'] if d['file_name'] not in test_list]
+    
     list_image_id_te = [d['id'] for d in lod_images_te]
     list_image_id_tr = [d['id'] for d in lod_images_tr]
-
-    lod_annotations_te = [d for d in json_file['annotations'] if d['image_id'] in list_image_id_te]
-    lod_annotations_tr = [d for d in json_file['annotations'] if d['image_id'] in list_image_id_tr]
-
+    
+    lod_annotations_te = [d for d in coco_annotations['annotations'] if d['image_id'] in list_image_id_te]
+    lod_annotations_tr = [d for d in coco_annotations['annotations'] if d['image_id'] in list_image_id_tr]
+    
     coco_dict_te = {
-        'info': json_file['info'],
-        'licenses': json_file['licenses'],
+        'info': coco_annotations['info'],
+        'licenses': coco_annotations['licenses'],
         'images': lod_images_te,
-        'categories': json_file['categories'],
+        'categories': coco_annotations['categories'],
         'annotations': lod_annotations_te
         }
     
     coco_dict_tr = {
-        'info': json_file['info'],
-        'licenses': json_file['licenses'],
+        'info': coco_annotations['info'],
+        'licenses': coco_annotations['licenses'],
         'images': lod_images_tr,
-        'categories': json_file['categories'],
+        'categories': coco_annotations['categories'],
         'annotations': lod_annotations_tr
         }
     
-    writeJson(join(path_dir_split,f'te_{json_name}'),coco_dict_te)
-    writeJson(join(path_dir_split,f'tr_{json_name}'),coco_dict_tr)
+    writeJson(join(path_dir_output,f'{json_name}_te.json'),coco_dict_te)
+    writeJson(join(path_dir_output,f'{json_name}_tr.json'),coco_dict_tr)
