@@ -52,12 +52,6 @@ Furthermore, it contains the notebooks used to compute the parameters and the re
 
 [Home](#toc)	
 
-## 01_Development
-
-This folder contains exploratory research on CutLER, and CLIP with text-to-image prompts and is not submitted for grading.
-
-[Home](#toc)
-
 # 1. Pipeline <a name="pipeline"></a>
 <img src="img/glob_pipeline.jpg" alt="Pipeline" width="500"/>
 
