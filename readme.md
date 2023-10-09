@@ -2,16 +2,16 @@
 0. [Structure](#structure)
 1. [Pipeline](#pipeline)
 2. [Processing **video** files](#from_videos)  
-	1. [Image collection](#ifv:collecting_images)   
-	2. [Mask and embedding collection](#ifv:collecting_masks_and_embeddings)  
-	3. [Manual annotation generation](#ifv:generating_manual_annotations)  
-		1. [Category definition](#ifv:defining_categories)  
-		2. [Example collection](#ifv:collecting_examples)  
-		3. [Groud truth generation](#ifv:_collecting_ground_truth)  
-	4. [GT_macthing](#ifv:GT_matching)
-	5. [Image retrieval](#ifv:image_retrieval)
+	1. [Image collection](#collecting_images)   
+	2. [Mask and embedding collection](#collecting_masks_and_embeddings)  
+	3. [Manual annotation generation](#generating_manual_annotations)  
+		1. [Category definition](#defining_categories)  
+		2. [Example collection](#collecting_examples)  
+		3. [Groud truth generation](#collecting_ground_truth)  
+	4. [GT_macthing](#GT_matching)
+	5. [Image retrieval](#image_retrieval)
 3. [Processing **image** files](#from_images)
-	1. [Image collection](#ifi:collecting_images)
+	1. [Image collection](#collecting_imagesII)
 	1. [Adaptations](#adaptations)
 		1. [Ground truth adaptation](#gtmatching)
 		2. [Manual annotations](#manualannotations)
@@ -59,7 +59,7 @@ This folder contains exploratory research on CutLER, and CLIP with text-to-image
 [Home](#toc)
 
 # 1. Pipeline <a name="pipeline"></a>
-<img src="img/glob_pipeline.jpg" alt="Pipeline" width="150"/>
+<img src="img/glob_pipeline.jpg" alt="Pipeline" width="500"/>
 
 The **Source*  &rarr; *Partially classified images/masks** part is fully implemented.
 
@@ -80,7 +80,7 @@ The **For each available category do** part is partially implemented.
 
 # 2. Processing **video** files <a name="from_videos"></a>
 
-## 2.1. Image collection <a name="ifv:collecting_images"></a>
+## 2.1. Image collection <a name="collecting_images"></a>
 
 1. Run `00_images_from_src.py`.
 2. Enter `y` when prompted with `from video [y/n]`.
@@ -111,7 +111,7 @@ You can tune other parameters such as the `pruning_interval`, `minimum_light`, `
 
 [Home](#toc)
 
-## 2.2. Mask and embedding collection <a name="ifv:collecting_masks_and_embeddings"></a>
+## 2.2. Mask and embedding collection <a name="collecting_masks_and_embeddings"></a>
 
 1. Run `01_collect_masks.py`.
 2. The script guides you selecting the different parameters:  
@@ -148,7 +148,7 @@ You can tune other parameters such as the `pruning_interval`, `minimum_light`, `
 	  
 [Home](#toc)
 
-## 2.3. Manual annotation generation <a name="ifv:generating_manual_annotations"></a>
+## 2.3. Manual annotation generation <a name="generating_manual_annotations"></a>
 
 The manual annotation tool has two channels:    
 
@@ -163,11 +163,11 @@ The full process of both channel is detailed in the following figure.
 - The light blue parts represent the decisions and processes that depend on the user. 
 - The bold arrows represent the *examples collection* process for a single category.
 
-<img src="img/manuall_all.jpg" alt="Annotation Procedure"  style="width:500px;height:250px;"/>
+<img src="img/manuall_all.jpg" alt="Annotation Procedure"  style="width:300"/>
 
 [Home](#toc)
 
-### 2.3.1 Category definition <a name="ifv:defining_categories"></a>
+### 2.3.1 Category definition <a name="defining_categories"></a>
 
 1. Run `02_manual_annotations.py`.
 2. Enter `n` when prompted with `ground truth [y/n]`.  
@@ -182,7 +182,7 @@ The full process of both channel is detailed in the following figure.
 	  
 [Home](#toc)
 	 
-### 2.3.2 Example collection <a name="ifv:collecting_examples"></a>
+### 2.3.2 Example collection <a name="collecting_examples"></a>
 	
 6. Pick the category to annotate among the displayed categories. 
 7. When no annotation is available, you can enter the `timestamp_id` of an image containing an object example of the category you are currently annotating.  
@@ -204,7 +204,7 @@ As this is never the case during this work, some parts of the code assume a sing
 
 [Home](#toc)
 
-### 2.3.3 Ground truth generation <a name="ifv: collecting ground truth"></a> 
+### 2.3.3 Ground truth generation <a name="collecting_ground_truth"></a> 
 As depicted in the above figure, it is possible to create a ground truth using the annoation tool. The dataset `jerry_real` has been annotated using this method.  
 Similarly to having a train set and a test set, having two different annotation channels allows to separate the ground truth annotations from the example annotations.  
 As the script guides the user in a seamless manner, and having the *If Statement Diagram* available, the steps for the ground truth annotation are not further detailed.
@@ -214,7 +214,7 @@ As the script guides the user in a seamless manner, and having the *If Statement
 
 [Home](#toc)
 
-## 2.4 GT matching <a name="ifv:GT_matching"></a>
+## 2.4 GT matching <a name="GT_matching"></a>
 
 **If a ground truth is available**, you can run the script `03_GT_matching.py`.
 
@@ -229,7 +229,7 @@ This will replace the default values of the fields `in_GT`, `GT_id` `GT_category
 
 [Home](#toc)
 
-## 2.5 Image retrieval <a name="ifv:image_retrieval"></a>
+## 2.5 Image retrieval <a name="image_retrieval"></a>
 1. Run `04_image_retrieval`.
 2. `points per side` ← enter the number of points per side used to compute the masks and embeddings.
 3. `channel` ← enter the channel to process.
@@ -255,7 +255,7 @@ This will replace the default values of the fields `in_GT`, `GT_id` `GT_category
 As any image data obtained via the videos is unlabeled, the main goal of this part is to provide a way to load annotated datasets.  
 
 - The pipeline relies on the `timestamp_id` of the images to quickly find the images to crop using the segmentation masks outputted by SAM.  
-  As the annotated datasets comes from other sources, the [section 3.1.](#ifi:collecting images) explains how any dataset can be formatted to align with the necessary format.  
+  As the annotated datasets comes from other sources, the [section 3.1.](#collecting_imagesII) explains how any dataset can be formatted to align with the necessary format.  
   
 - Once the images are loaded and the image names formated, the [section 3.2](#adaptations) explains the further required steps to be able to run the image retrieval and the rest of the pipeline as if  
   the images were originated from videos. 
@@ -263,7 +263,7 @@ As any image data obtained via the videos is unlabeled, the main goal of this pa
   	- The ground truth associated to the loaded dataset must be adapted, as described in  [section 3.2.1.](#gtmatching).
   	- Manual annotations must be provided, as described in  [section 3.2.2.](#manualannotations). 
 
-## 3.1. Image collection <a name="ifi:collecting_images"></a>
+## 3.1. Image collection <a name="collecting_imagesII"></a>
 
 1. Run `00_images_from_src.py`.
 2. Enter `n` when prompted with `from video [y/n]`.
@@ -296,14 +296,14 @@ As any image data obtained via the videos is unlabeled, the main goal of this pa
 	> To get some inspiration, have a look at the companion notebook `GT_matching.ipynb`.  
 	  You can follow the formating performed on the `Innorecycling objects` (WSM0001), `COCO` (ARM0002), and `LVIS` (ARM0001) datasets.
   
-4. Once the dictionary is formated, you can run `03_GT_matching`, as explained the [section 2.4.](#ifv:GT matching) 
+4. Once the dictionary is formated, you can run `03_GT_matching`, as explained the [section 2.4.](#GT_matching) 
 
 ### 3.2.2 Manual annotations <a name="manualannotations"></a>
 
-- If the number of categories is reasonable, you can annotate the 20 required example using the annotation tool, as explained in the [section 2.3.2.](#ifv:collecting examples)
+- If the number of categories is reasonable, you can annotate the 20 required example using the annotation tool, as explained in the [section 2.3.2.](#collecting_examples)
 - Alternatively, you can extract 20 annotations per category from the ground truth and save them at `{path_root_manual_annotation}/{channel}/ann_images`, *as if* they were originated from annotation tool.   
   If you decide to do so, you need to run the annotation tool to compute the embeddings once the annotations are copied at the requested location.  
-  Run the annotation tool  as explained in the [section 2.3.2.](#ifv:collecting examples) but quit the process without annotating anything. The embeddings will be computed.
+  Run the annotation tool  as explained in the [section 2.3.2.](#collecting_examples) but quit the process without annotating anything. The embeddings will be computed.
   
   	> To get some inspiration, have a look at the companion notebook `GT_matching.ipynb`.  
 	  You can follow the annotation extraction performed on the `COCO` (ARM0002) dataset.
