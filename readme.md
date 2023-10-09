@@ -1,17 +1,17 @@
 # Table of content <a name="toc"></a>
 0. [Structure](#structure)
 1. [Pipeline](#pipeline)
-2. [Processing **video** files](#from videos)  
-	1. [Image collection](#ifv:collecting images)   
-	2. [Mask and embedding collection](#ifv:collecting masks and embeddings)  
-	3. [Manual annotation generation](#ifv:generating manual annotations)  
-		1. [Category definition](#ifv:defining categories)  
-		2. [Example collection](#ifv:collecting examples)  
-		3. [Groud truth generation](#ifv: collecting ground truth)  
-	4. [GT_macthing](#ifv:GT matching)
-	5. [Image retrieval](#ifv:image retrieval)
-3. [Processing **image** files](#from images)
-	1. [Image collection](#ifi:collecting images)
+2. [Processing **video** files](#from_videos)  
+	1. [Image collection](#ifv:collecting_images)   
+	2. [Mask and embedding collection](#ifv:collecting_masks_and_embeddings)  
+	3. [Manual annotation generation](#ifv:generating_manual_annotations)  
+		1. [Category definition](#ifv:defining_categories)  
+		2. [Example collection](#ifv:collecting_examples)  
+		3. [Groud truth generation](#ifv:_collecting_ground_truth)  
+	4. [GT_macthing](#ifv:GT_matching)
+	5. [Image retrieval](#ifv:image_retrieval)
+3. [Processing **image** files](#from_images)
+	1. [Image collection](#ifi:collecting_images)
 	1. [Adaptations](#adaptations)
 		1. [Ground truth adaptation](#gtmatching)
 		2. [Manual annotations](#manualannotations)
@@ -78,9 +78,9 @@ The **For each available category do** part is partially implemented.
 
 [Home](#toc)
 
-# 2. Processing **video** files <a name="from videos"></a>
+# 2. Processing **video** files <a name="from_videos"></a>
 
-## 2.1. Image collection <a name="ifv:collecting images"></a>
+## 2.1. Image collection <a name="ifv:collecting_images"></a>
 
 1. Run `00_images_from_src.py`.
 2. Enter `y` when prompted with `from video [y/n]`.
@@ -111,7 +111,7 @@ You can tune other parameters such as the `pruning_interval`, `minimum_light`, `
 
 [Home](#toc)
 
-## 2.2. Mask and embedding collection <a name="ifv:collecting masks and embeddings"></a>
+## 2.2. Mask and embedding collection <a name="ifv:collecting_masks_and_embeddings"></a>
 
 1. Run `01_collect_masks.py`.
 2. The script guides you selecting the different parameters:  
@@ -148,7 +148,7 @@ You can tune other parameters such as the `pruning_interval`, `minimum_light`, `
 	  
 [Home](#toc)
 
-## 2.3. Manual annotation generation <a name="ifv:generating manual annotations"></a>
+## 2.3. Manual annotation generation <a name="ifv:generating_manual_annotations"></a>
 
 The manual annotation tool has two channels:    
 
@@ -163,11 +163,11 @@ The full process of both channel is detailed in the following figure.
 - The light blue parts represent the decisions and processes that depend on the user. 
 - The bold arrows represent the *examples collection* process for a single category.
 
-<img src="img/manuall_all.jpg" alt="Annotation Procedure"  style="width:100px;height:50px;"/>
+<img src="img/manuall_all.jpg" alt="Annotation Procedure"  style="width:500px;height:250px;"/>
 
 [Home](#toc)
 
-### 2.3.1 Category definition <a name="ifv:defining categories"></a>
+### 2.3.1 Category definition <a name="ifv:defining_categories"></a>
 
 1. Run `02_manual_annotations.py`.
 2. Enter `n` when prompted with `ground truth [y/n]`.  
@@ -182,7 +182,7 @@ The full process of both channel is detailed in the following figure.
 	  
 [Home](#toc)
 	 
-### 2.3.2 Example collection <a name="ifv:collecting examples"></a>
+### 2.3.2 Example collection <a name="ifv:collecting_examples"></a>
 	
 6. Pick the category to annotate among the displayed categories. 
 7. When no annotation is available, you can enter the `timestamp_id` of an image containing an object example of the category you are currently annotating.  
@@ -214,7 +214,7 @@ As the script guides the user in a seamless manner, and having the *If Statement
 
 [Home](#toc)
 
-## 2.4 GT matching <a name="ifv:GT matching"></a>
+## 2.4 GT matching <a name="ifv:GT_matching"></a>
 
 **If a ground truth is available**, you can run the script `03_GT_matching.py`.
 
@@ -229,7 +229,7 @@ This will replace the default values of the fields `in_GT`, `GT_id` `GT_category
 
 [Home](#toc)
 
-## 2.5 Image retrieval <a name="ifv:image retrieval"></a>
+## 2.5 Image retrieval <a name="ifv:image_retrieval"></a>
 1. Run `04_image_retrieval`.
 2. `points per side` ← enter the number of points per side used to compute the masks and embeddings.
 3. `channel` ← enter the channel to process.
@@ -250,7 +250,7 @@ This will replace the default values of the fields `in_GT`, `GT_id` `GT_category
 [Home](#toc)
 
 
-# 3. Processing **images** files <a name="from images"></a>
+# 3. Processing **images** files <a name="from_images"></a>
 
 As any image data obtained via the videos is unlabeled, the main goal of this part is to provide a way to load annotated datasets.  
 
@@ -263,7 +263,7 @@ As any image data obtained via the videos is unlabeled, the main goal of this pa
   	- The ground truth associated to the loaded dataset must be adapted, as described in  [section 3.2.1.](#gtmatching).
   	- Manual annotations must be provided, as described in  [section 3.2.2.](#manualannotations). 
 
-## 3.1. Image collection <a name="ifi:collecting images"></a>
+## 3.1. Image collection <a name="ifi:collecting_images"></a>
 
 1. Run `00_images_from_src.py`.
 2. Enter `n` when prompted with `from video [y/n]`.
